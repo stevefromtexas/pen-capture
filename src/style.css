@@ -92,3 +92,39 @@ canvas {
   /* A finger scrolls vertically; the Pencil's touches are cancelled in capture.ts. */
   touch-action: pan-y;
 }
+
+.toolbar.secondary {
+  margin-top: 6px;
+}
+
+.toolbar button:disabled {
+  opacity: 0.35;
+}
+
+.toolbar [hidden] {
+  display: none;
+}
+
+#saved {
+  margin-left: auto;
+  color: #9be37b;
+  font-size: 12px;
+}
+
+#saved.bad {
+  color: #ff8a8a;
+  font-weight: bold;
+}
+
+#status {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #ddd;
+}
+
+details {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #aaa;
+}
+

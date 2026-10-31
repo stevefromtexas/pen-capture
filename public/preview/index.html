@@ -1,0 +1,96 @@
+<!doctype html>
+<!--
+  Ink preview shell. scripts/build-ink-preview.sh copies this next to mq_js_bundle.js and
+  ink_preview.wasm, into the capture editor's public/preview/ folder. The editor saves its
+  state and opens this page; this page reads the project from that same autosave
+  (same site, so same storage) and hands it to the Rust app.
+  This is a dev tool: it never ships in the game (CLAUDE.md JS exception).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Ink preview</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #14101c;
+    touch-action: none; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  /* Phone-width column, centered on the iPad, like the game. */
+  #glcanvas {
+    position: absolute; top: 0; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: min(100%, 480px); height: 100%; outline: none; touch-action: none;
+  }
+  #back {
+    position: absolute; top: 8px; right: 8px; z-index: 1;
+    font: 15px -apple-system, system-ui, sans-serif; padding: 8px 14px;
+    border: 1px solid #666; border-radius: 6px; background: #e0247a; color: #fff;
+  }
+</style>
+</head>
+<body>
+<canvas id="glcanvas" tabindex="1"></canvas>
+<button id="back">Back to editor</button>
+<script>
+  // macroquad's bundle assigns this global without declaring it (its quad-net part), which
+  // throws in strict contexts and stops the rest of the bundle loading. Same shim as the game.
+  var register_plugin;
+</script>
+<script src="mq_js_bundle.js"></script>
+<script>
+  // Read the editor's autosave: IndexedDB first, localStorage as the fallback (the same
+  // places tools/tablet-capture/src/storage.ts writes).
+  function readSaved() {
+    const fromLocal = () => {
+      try { return localStorage.getItem("letter-capture:state"); } catch { return null; }
+    };
+    return new Promise((resolve) => {
+      let req;
+      try { req = indexedDB.open("letter-capture", 1); } catch { return resolve(fromLocal()); }
+      req.onupgradeneeded = () => req.result.createObjectStore("state");
+      req.onerror = () => resolve(fromLocal());
+      req.onsuccess = () => {
+        try {
+          const get = req.result.transaction("state").objectStore("state").get("current");
+          get.onsuccess = () => resolve(typeof get.result === "string" ? get.result : fromLocal());
+          get.onerror = () => resolve(fromLocal());
+        } catch { resolve(fromLocal()); }
+      };
+    });
+  }
+
+  // The bridge. macroquad's loader sets the globals wasm_exports and wasm_memory once the
+  // wasm is running; until then the text waits in `pending`.
+  let pending = null;
+  function deliver() {
+    if (pending === null || typeof wasm_exports === "undefined" || !wasm_exports) return;
+    const bytes = new TextEncoder().encode(pending);
+    pending = null;
+    const ptr = wasm_exports.preview_alloc(bytes.length);
+    new Uint8Array(wasm_memory.buffer, ptr, bytes.length).set(bytes);
+    wasm_exports.preview_ready(bytes.length);
+  }
+  readSaved().then((text) => {
+    if (!text) return; // the Rust app keeps showing "waiting"
+    try {
+      // The autosave holds { project, history }; the app wants just the project.
+      const saved = JSON.parse(text);
+      pending = JSON.stringify(saved.project ?? saved);
+    } catch { /* leave it waiting */ }
+    deliver();
+  });
+  setInterval(deliver, 100);
+
+  // Back to the editor, telling it which stroke was being drawn so it can select it.
+  window.currentStroke = () =>
+    typeof wasm_exports !== "undefined" && wasm_exports ? wasm_exports.preview_stroke() : -1;
+  document.getElementById("back").addEventListener("click", () => {
+    const id = window.currentStroke();
+    location.href = "../" + (id >= 0 ? "?stroke=" + id : "");
+  });
+
+  load("ink_preview.wasm");
+</script>
+</body>
+</html>

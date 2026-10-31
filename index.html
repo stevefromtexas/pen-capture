@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-    <title>Letter capture (spike)</title>
+    <title>Letter capture</title>
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
@@ -11,16 +11,30 @@
       <nav class="toolbar">
         <button data-mode="write" class="active">Write</button>
         <button data-mode="select">Select</button>
+        <button data-mode="markers">Markers</button>
+        <button id="preview">Preview</button>
         <span class="sep"></span>
         <button id="undo">Undo</button>
-        <button id="clear">Clear</button>
-        <button id="add-lines">Add lines</button>
+        <button id="redo">Redo</button>
         <span class="sep"></span>
-        <button id="share">Save…</button>
-        <a id="download" download="letter-capture.json">Download</a>
-        <button id="copy">Copy JSON</button>
+        <button id="delete" hidden>Delete</button>
+        <button id="replace" hidden>Replace</button>
+        <button id="insert-after" hidden>Insert after</button>
+        <button id="stop-inserting" hidden>Stop inserting</button>
+        <button id="marker-kind" hidden>Make page break</button>
       </nav>
-      <dl class="readout" id="readout"></dl>
+      <nav class="toolbar secondary">
+        <button id="add-lines">Add lines</button>
+        <button id="backup">Backup</button>
+        <button id="import">Import</button>
+        <button id="export">Export</button>
+        <span id="saved">Autosaved</span>
+      </nav>
+      <p id="status"></p>
+      <details>
+        <summary>Pen stats</summary>
+        <dl class="readout" id="readout"></dl>
+      </details>
     </header>
     <main id="paper">
       <canvas id="sheet"></canvas>
