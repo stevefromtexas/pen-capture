@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Letter capture (spike)</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header>
+      <nav class="toolbar">
+        <button data-mode="write" class="active">Write</button>
+        <button data-mode="select">Select</button>
+        <span class="sep"></span>
+        <button id="undo">Undo</button>
+        <button id="clear">Clear</button>
+        <button id="add-lines">Add lines</button>
+        <span class="sep"></span>
+        <button id="share">Save…</button>
+        <a id="download" download="letter-capture.json">Download</a>
+        <button id="copy">Copy JSON</button>
+      </nav>
+      <dl class="readout" id="readout"></dl>
+    </header>
+    <main id="paper">
+      <canvas id="sheet"></canvas>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
