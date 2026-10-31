@@ -108,8 +108,15 @@ export class Capture {
     const batch = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
     const samples = batch.length > 0 ? batch : [e];
     const from = this.current.points.length;
+    // iPad Safari repeats part of the previous batch in each coalesced list (the first spike
+    // capture had ~46% duplicates, with time running backwards). Keep only samples newer
+    // than the last one recorded.
+    let lastT = this.current.points[from - 1][3];
     for (const s of samples) {
-      this.current.points.push(this.sample(s));
+      const point = this.sample(s);
+      if (point[3] <= lastT) continue;
+      lastT = point[3];
+      this.current.points.push(point);
       this.stats.strokeMin = Math.min(this.stats.strokeMin, s.pressure);
       this.stats.strokeMax = Math.max(this.stats.strokeMax, s.pressure);
     }
