@@ -36,6 +36,16 @@
   // macroquad's bundle assigns this global without declaring it (its quad-net part), which
   // throws in strict contexts and stops the rest of the bundle loading. Same shim as the game.
   var register_plugin;
+  // An opaque canvas, as in the game's shell (web/shell.html explains why).
+  (function () {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, attributes) {
+      if (type === "webgl" || type === "webgl2") {
+        attributes = Object.assign({ alpha: false }, attributes);
+      }
+      return getContext.call(this, type, attributes);
+    };
+  })();
 </script>
 <script src="mq_js_bundle.js"></script>
 <script>
