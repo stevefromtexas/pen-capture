@@ -1,5 +1,5 @@
 // Keeping the work safe.
-// - Autosave: the project *and* its undo history go into IndexedDB after every change.
+// - Autosave: each letter's project *and* undo history go into IndexedDB after every change.
 //   (IndexedDB rather than localStorage: a whole letter with its history can pass
 //   localStorage's ~5 MB limit.) Safari may clear site data after weeks unused, hence:
 // - Backup: the same state as a file through the share sheet (AirDrop, Save to Files).
@@ -14,9 +14,23 @@ export interface Saved {
   history: { done: History["done"]; undone: History["undone"] };
 }
 
+// Several letters can live side by side. IndexedDB keys (localStorage keys get a
+// "letter-capture:" prefix when IndexedDB is unavailable):
+//   letters       the list: [{ id, name, updated }]
+//   active        id of the letter being edited
+//   letter:<id>   that letter's project + undo history
+//   current       the active letter again, written just before opening the Preview, which
+//                 reads it (older versions kept their only letter here; it's migrated)
+
+export interface LetterInfo {
+  id: string;
+  name: string;
+  /** ISO time of the last save. */
+  updated: string;
+}
+
 const DB = "letter-capture";
 const STORE = "state";
-const KEY = "current";
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -27,72 +41,168 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-/** Fallback when IndexedDB is unavailable (some private or locked-down browsers). */
-const LOCAL_KEY = "letter-capture:state";
+/** localStorage key for a fallback key. "current" keeps the name the Preview reads. */
+const localKey = (key: string) => (key === "current" ? "letter-capture:state" : `letter-capture:${key}`);
 
-/** The last autosaved state, or null (nothing saved, or storage unavailable). */
-export async function load(): Promise<Saved | null> {
-  let text: unknown = null;
+async function get(key: string): Promise<string | null> {
   try {
     const db = await openDb();
-    text = await new Promise<unknown>((resolve, reject) => {
-      const req = db.transaction(STORE).objectStore(STORE).get(KEY);
+    const value = await new Promise<unknown>((resolve, reject) => {
+      const req = db.transaction(STORE).objectStore(STORE).get(key);
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
     db.close();
-  } catch (err) {
-    console.info("IndexedDB unavailable, trying localStorage", err);
+    if (typeof value === "string") return value;
+  } catch {
+    /* IndexedDB unavailable: fall through */
   }
   try {
-    if (typeof text !== "string") text = localStorage.getItem(LOCAL_KEY);
-    return typeof text === "string" ? parseState(text) : null;
-  } catch (err) {
-    console.warn("autosave load failed", err);
+    return localStorage.getItem(localKey(key));
+  } catch {
     return null;
   }
 }
 
-async function store(text: string): Promise<void> {
+async function put(key: string, value: string): Promise<void> {
   try {
-    await storeDb(text);
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
   } catch {
     // localStorage holds about 5 MB; a long letter with its history may not fit, in which
     // case this throws and the toolbar says NOT SAVED (Backup still works).
-    localStorage.setItem(LOCAL_KEY, text);
+    localStorage.setItem(localKey(key), value);
   }
 }
 
-async function storeDb(text: string): Promise<void> {
-  const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put(text, KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
+async function remove(key: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* fall through */
+  }
+  try {
+    localStorage.removeItem(localKey(key));
+  } catch {
+    /* nothing to remove */
+  }
+}
+
+let letters: LetterInfo[] = [];
+
+const saveIndex = () => put("letters", JSON.stringify(letters));
+const newLetterId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+/** The letter list, in the order they were made. */
+export const listLetters = (): LetterInfo[] => letters.map((l) => ({ ...l }));
+
+/**
+ * Loads the letter list and the active letter. On first run after the multi-letter update,
+ * the single autosaved letter becomes "Letter 1".
+ */
+export async function openLetters(): Promise<{ active: string; saved: Saved | null }> {
+  try {
+    letters = JSON.parse((await get("letters")) ?? "[]") as LetterInfo[];
+  } catch {
+    letters = [];
+  }
+  if (letters.length === 0) {
+    const old = await get("current");
+    const id = newLetterId();
+    letters = [{ id, name: "Letter 1", updated: new Date().toISOString() }];
+    if (old) await put(`letter:${id}`, old);
+    await saveIndex();
+    await put("active", id);
+  }
+  let active = (await get("active")) ?? letters[0].id;
+  if (!letters.some((l) => l.id === active)) active = letters[0].id;
+  return { active, saved: await loadLetter(active) };
+}
+
+/** A letter's saved state, or null if it's new or unreadable. */
+export async function loadLetter(id: string): Promise<Saved | null> {
+  const text = await get(`letter:${id}`);
+  try {
+    return text ? parseState(text) : null;
+  } catch (err) {
+    console.warn("couldn't read letter", id, err);
+    return null;
+  }
+}
+
+export async function setActive(id: string): Promise<void> {
+  await put("active", id);
+}
+
+/** Adds an empty letter and makes it active. */
+export async function createLetter(name: string): Promise<LetterInfo> {
+  const info = { id: newLetterId(), name, updated: new Date().toISOString() };
+  letters.push(info);
+  await saveIndex();
+  await setActive(info.id);
+  return { ...info };
+}
+
+export async function renameLetter(id: string, name: string): Promise<void> {
+  const l = letters.find((x) => x.id === id);
+  if (l) l.name = name;
+  await saveIndex();
+}
+
+/** Deletes a letter for good (the caller confirms first and picks what to show next). */
+export async function deleteLetter(id: string): Promise<void> {
+  letters = letters.filter((l) => l.id !== id);
+  await saveIndex();
+  await remove(`letter:${id}`);
+}
+
+async function saveLetter(id: string, state: Saved): Promise<void> {
+  await put(`letter:${id}`, stateJson(state));
+  const l = letters.find((x) => x.id === id);
+  if (l) {
+    l.updated = new Date().toISOString();
+    await saveIndex();
+  }
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
 
-/** Saves right now (before leaving for the Preview page). Throws if nothing could be saved. */
-export async function saveNow(state: Saved): Promise<void> {
+/** Saves right now, and hands the letter to the Preview. Throws if nothing could be saved. */
+export async function saveNow(id: string, state: Saved): Promise<void> {
   clearTimeout(timer);
-  await store(stateJson(state));
+  await saveLetter(id, state);
+  await put("current", stateJson(state));
 }
 
 /** Saves shortly after the last change (changes come in bursts while writing). */
-export function saveSoon(state: () => Saved, status: (ok: boolean) => void): void {
+export function saveSoon(id: string, state: () => Saved, status: (ok: boolean) => void): void {
   clearTimeout(timer);
   timer = setTimeout(() => {
-    store(stateJson(state()))
+    saveLetter(id, state())
       .then(() => status(true))
       .catch((err) => {
         console.warn("autosave failed", err);
         status(false);
       });
   }, 600);
+}
+
+/** Cancels a pending autosave (when switching letters, after saving the old one explicitly). */
+export function cancelPending(): void {
+  clearTimeout(timer);
 }
 
 export function stateJson(s: Saved): string {
@@ -110,8 +220,9 @@ export function parseState(text: string): Saved {
 }
 
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-export const backupName = () => `letter-backup-${stamp()}.json`;
-export const exportName = () => `letter-${stamp()}.json`;
+const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "letter";
+export const backupName = (name: string) => `${slug(name)}-backup-${stamp()}.json`;
+export const exportName = (name: string) => `${slug(name)}-${stamp()}.json`;
 
 /**
  * Hands a file to the user: the share sheet where available (iPad Safari over HTTPS),

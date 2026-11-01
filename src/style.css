@@ -30,6 +30,7 @@ header {
 }
 
 .toolbar button,
+.toolbar select,
 .toolbar a {
   font: inherit;
   padding: 8px 12px;

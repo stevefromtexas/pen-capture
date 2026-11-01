@@ -26,6 +26,8 @@ let history = new History();
 let mode: Mode = "write";
 const overlay = emptyOverlay();
 let saveOk = true;
+/** The letter being edited (see storage.ts: several letters live side by side). */
+let letterId = "";
 
 const sheet = new Sheet($<HTMLCanvasElement>("#sheet"), project.height);
 
@@ -53,6 +55,7 @@ function changed() {
   }
   refresh();
   storage.saveSoon(
+    letterId,
     () => ({ project, history: { done: history.done, undone: history.undone } }),
     (ok) => {
       saveOk = ok;
@@ -258,13 +261,13 @@ on("#marker-kind", () => {
   if (m) run({ type: "changeMarker", before: { ...m }, after: { ...m, kind: m.kind === "page" ? "paragraph" : "page" } });
 });
 on("#add-lines", () => run({ type: "setHeight", before: project.height, after: project.height + LINES_PER_SCREEN * SHEET.rule }));
-on("#preview", () => openPreview({ project, history: { done: history.done, undone: history.undone } }));
+on("#preview", () => openPreview(letterId, state()));
 on("#backup", async () => {
-  const ok = await storage.saveFile(storage.backupName(), storage.stateJson({ project, history: { done: history.done, undone: history.undone } }));
+  const ok = await storage.saveFile(storage.backupName(letterName()), storage.stateJson(state()));
   if (!ok) alert("Backup failed. Try again, or use Export.");
 });
 on("#export", async () => {
-  const ok = await storage.saveFile(storage.exportName(), toJson(project));
+  const ok = await storage.saveFile(storage.exportName(letterName()), toJson(project));
   if (!ok) alert("Export failed.");
 });
 on("#import", async () => {
@@ -272,17 +275,91 @@ on("#import", async () => {
   if (text === null) return;
   try {
     const saved = storage.parseState(text);
-    if (project.strokes.length && !confirm("Replace everything on the sheet with this file? (Back up first if unsure.)")) return;
-    project = saved.project;
-    history = History.from(saved.history);
-    overlay.cursor = null;
-    overlay.selected.clear();
-    overlay.markerSelected = null;
-    fit();
+    if (project.strokes.length && !confirm(`Replace everything in "${letterName()}" with this file? (Make a New letter first to keep both.)`)) return;
+    show(saved);
     changed();
   } catch (err) {
     alert(`Couldn't import: ${(err as Error).message}`);
   }
+});
+
+// --- letters ---------------------------------------------------------------------------
+
+const state = (): storage.Saved => ({ project, history: { done: history.done, undone: history.undone } });
+const letterName = () => storage.listLetters().find((l) => l.id === letterId)?.name ?? "letter";
+const blank = () => newProject(40 * SHEET.rule, navigator.userAgent, new Date().toISOString());
+
+/** Puts a saved letter (or a blank sheet) on screen, with fresh UI state. */
+function show(saved: storage.Saved | null) {
+  project = saved?.project ?? blank();
+  history = History.from(saved?.history);
+  overlay.cursor = null;
+  overlay.selected.clear();
+  overlay.markerSelected = null;
+  current = null;
+  mode = "write"; // a different letter: ready to write
+  fit();
+  refresh();
+  window.scrollTo({ top: 0 });
+}
+
+function updateLetters() {
+  const select = $<HTMLSelectElement>("#letter");
+  select.replaceChildren(
+    ...storage.listLetters().map((l) => new Option(l.name, l.id, false, l.id === letterId)),
+  );
+}
+
+/** Saves the current letter now, then switches to another (or a new one). */
+async function switchLetter(to: () => Promise<{ id: string; saved: storage.Saved | null }>) {
+  storage.cancelPending();
+  try {
+    await storage.saveNow(letterId, state());
+  } catch {
+    if (!confirm("Couldn't save this letter. Switch anyway and lose recent changes?")) return;
+  }
+  const next = await to();
+  letterId = next.id;
+  await storage.setActive(letterId);
+  show(next.saved);
+  updateLetters();
+}
+
+$<HTMLSelectElement>("#letter").addEventListener("change", (e) => {
+  const id = (e.target as HTMLSelectElement).value;
+  switchLetter(async () => ({ id, saved: await storage.loadLetter(id) }));
+});
+on("#new-letter", () => {
+  const name = prompt("Name for the new letter:", `Letter ${storage.listLetters().length + 1}`);
+  if (!name) return;
+  switchLetter(async () => ({ id: (await storage.createLetter(name.trim() || "Letter")).id, saved: null }));
+});
+on("#rename-letter", async () => {
+  const name = prompt("Rename this letter:", letterName());
+  if (!name?.trim()) return;
+  await storage.renameLetter(letterId, name.trim());
+  updateLetters();
+});
+on("#delete-letter", async () => {
+  if (!confirm(`Delete "${letterName()}" for good? This can't be undone. (Backup first to keep a copy.)`)) return;
+  storage.cancelPending();
+  const doomed = letterId;
+  await storage.deleteLetter(doomed);
+  const rest = storage.listLetters();
+  const next = rest.length ? rest[0] : await storage.createLetter("Letter 1");
+  letterId = next.id;
+  await storage.setActive(letterId);
+  show(await storage.loadLetter(letterId));
+  updateLetters();
+});
+on("#clear-sheet", () => {
+  if (!project.strokes.length && !project.markers.length) return;
+  if (!confirm(`Clear everything in "${letterName()}"? (Undo brings it back.)`)) return;
+  const commands: Command[] = [];
+  project.markers.forEach((marker) => commands.push({ type: "deleteMarker", marker: { ...marker }, index: 0 }));
+  commands.push(deleteStrokes(project, new Set(project.strokes.map((s) => s.id))).command);
+  overlay.cursor = null;
+  run({ type: "batch", commands });
 });
 
 function scrollToStroke(id: number) {
@@ -312,13 +389,10 @@ function showStats(s: Stats) {
 // --- start ---------------------------------------------------------------------------
 
 window.addEventListener("resize", fit);
-storage.load().then((saved) => {
-  if (saved) {
-    project = saved.project;
-    history = History.from(saved.history);
-  }
-  fit();
-  refresh();
+storage.openLetters().then(({ active, saved }) => {
+  letterId = active;
+  show(saved);
+  updateLetters();
   // Back from the Preview: select the stroke it was drawing, so it's easy to fix.
   const fromPreview = strokeFromPreview();
   if (fromPreview !== null && strokeIndex(project, fromPreview) >= 0) {

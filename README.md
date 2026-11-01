@@ -9,6 +9,12 @@ private. `.gitignore` already blocks `*.json` apart from the project's config fi
 
 ## Workflow
 
+**Several letters:** the picker at the start of the second toolbar row switches between
+letters. Each one keeps its own sheet and undo history. Use **New letter**, **Rename** and
+**Delete letter** (permanent; Backup first). **Clear sheet** empties the current letter and
+can be undone. Backup, Export and Preview always work on the letter you're on, and files are
+named after it.
+
 1. Draft the words on paper first.
 2. **Write** the letter. Only the Pencil writes; a finger scrolls. The sheet grows by itself
    (or tap **Add lines**).
@@ -33,8 +39,9 @@ private. `.gitignore` already blocks `*.json` apart from the project's config fi
 6. **Export** when done (repeatable; it deletes nothing). The file goes into the game repo's
    private `art/letter/raw/`.
 
-Autosave runs after every change (IndexedDB, falling back to localStorage). If the toolbar
-says **NOT SAVED**, use Backup.
+Autosave runs after every change, per letter (IndexedDB, falling back to localStorage). If the
+toolbar says **NOT SAVED**, use Backup. Work from before the multi-letter update opens as
+"Letter 1".
 
 **Pen stats** (collapsed under the toolbar) shows the spike's checks: pointer type,
 pressure, samples per event and per second.

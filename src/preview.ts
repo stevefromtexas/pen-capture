@@ -7,9 +7,9 @@
 import * as storage from "./storage";
 
 /** Saves the current state, then goes to the preview page. */
-export async function openPreview(state: storage.Saved): Promise<void> {
+export async function openPreview(letterId: string, state: storage.Saved): Promise<void> {
   try {
-    await storage.saveNow(state);
+    await storage.saveNow(letterId, state);
   } catch {
     alert("Couldn't save before previewing (storage unavailable). Use Backup to keep your work.");
     return;
